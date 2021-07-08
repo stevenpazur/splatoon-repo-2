@@ -5,9 +5,11 @@ using UnityEngine.Animations.Rigging;
 
 public class HeadAimLimit : MonoBehaviour
 {
+    public float maxDistanceFromBack = 6;
     public Transform player;
     public Transform lookAtTarget;
     public Transform backOfPlayer;
+    public Rig rigObject;
 
     private void Update()
     {
@@ -15,11 +17,11 @@ public class HeadAimLimit : MonoBehaviour
 
         if(lookAtTarget.position.z < player.position.z)
         {
-            GetComponent<Rig>().weight = Remap(distanceToBack, 0, 7, 0, 1);
+            rigObject.weight = Remap(distanceToBack, 0, maxDistanceFromBack, 0, 1);
         }
         else
         {
-            GetComponent<Rig>().weight = 1;
+            rigObject.weight = 1;
         }
     }
 

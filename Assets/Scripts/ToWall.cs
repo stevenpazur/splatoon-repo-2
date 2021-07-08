@@ -1,35 +1,41 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Animations.Rigging;
 
 public class ToWall : MonoBehaviour
 {
-    public GameObject model, gun;
+    public GameObject model, gun, outfit;
     public ParticleSystem swimParticle;
     public float Velocity, SwimVelocity;
     private float playerSpeed = 6; // move speed
     private float turnSpeed = 90; // turning speed (degrees/second)
     public float lerpSpeed = 10; // smoothing speed
     private float gravity = 0.15f; // gravity acceleration
-    private bool isGrounded;
+    private bool isGrounded = false, canJump = false;
     public float deltaGround = -0.5f; // character is grounded up to this distance
-    private float jumpSpeed = 10; // vertical jump initial speed
     public float jumpRange = 0.1f; // range to detect target wall
     public float jumpHeight = 0.5f;
-    private bool jumpingUp = false;
     [Range(0, 1)] public float similarColorsOffsetValue = 0.1f;
     private Vector3 surfaceNormal; // current surface normal
     private Vector3 myNormal; // character normal
     private float distGround; // distance from character position to ground
     private bool jumping = false; // flag &quot;I'm jumping to wall&quot;
-    private float vertSpeed = 0; // vertical jump current speed
     private bool blockRotation = false;
+    private bool squidKid = false;
+    private float inputMagnitude;
+    private List<Material> modelMaterials, outfitMaterials;
+    private List<Texture> origBaseMaps, origBumpMaps;
+    private List<Color> origColors;
 
     private Transform myTransform;
     //public BoxCollider boxCollider; // drag BoxCollider ref in editor
     public Animator anim;
     public Color theColor;
+    public Material inkMaterial;
+    public Rig squidkidRigs;
 
     [Header("Animation Smoothing")]
     [Range(0, 1f)]
@@ -40,30 +46,37 @@ public class ToWall : MonoBehaviour
     public float StartAnimTime = 0.3f;
     [Range(0, 1f)]
     public float StopAnimTime = 0.15f;
+    [Range(0, 30f)]
+    public float SquidNowKidNow = 10f;
 
     private void Start()
     {
         myNormal = transform.up; // normal starts as character up direction
         myTransform = transform;
-        //GetComponent<Rigidbody>().freezeRotation = true; // disable physics rotation
-                                         // distance from transform.position to ground
-        distGround = GetComponent<CharacterController>().bounds.size.y - GetComponent<CharacterController>().center.y;
+        modelMaterials = model.GetComponent<Renderer>().materials.ToList();
+        //outfitMaterials = outfit.Get
+        origBaseMaps = new List<Texture>();
+        origBumpMaps = new List<Texture>();
+        origColors = new List<Color>();
+
+        for(int i = 0; i < modelMaterials.Count; i++)
+        {
+            origBaseMaps.Add(modelMaterials[i].GetTexture("_BaseMap"));
+            origBumpMaps.Add(modelMaterials[i].GetTexture("_BumpMap"));
+            origColors.Add(modelMaterials[i].GetColor("_BaseColor"));
+        }
     }
 
     private void FixedUpdate()
     {
         // apply constant weight force according to character normal:
         //GetComponent<Rigidbody>().AddForce(-gravity * GetComponent<Rigidbody>().mass * myNormal);
-        if (!isGrounded)
-        {
-            print("pull");
-            GetComponent<CharacterController>().Move(-gravity * myNormal);
-        }
+        GetComponent<CharacterController>().Move(-gravity * myNormal);
     }
 
     private void Update()
     {
-        // jump code - jump to wall or simple jump
+        // jump code - jump to wall
         if (jumping) return; // abort Update while jumping to a wall
 
         anim.SetBool("shooting", blockRotation);
@@ -71,25 +84,39 @@ public class ToWall : MonoBehaviour
         Ray ray;
         RaycastHit hit;
 
-
+        squidKid = Input.GetButton("Fire2");
         if (Input.GetButton("Fire2"))
         {
+            GetComponent<CharacterController>().height = 1.1f;
+            //squidkidRigs.weight = 1;
+            if(squidkidRigs.weight < 1)
+            {
+                squidkidRigs.weight += SquidNowKidNow * Time.deltaTime;
+            }
+            else
+            {
+                squidkidRigs.weight = 1;
+            }
+            //anim.Play("Squid Kid");
             GetComponent<ShootingSystem>().canShoot = false;
 
+            for (int i = 0; i < modelMaterials.Count; i++)
+            {
+                modelMaterials[i].SetTexture("_BaseMap", inkMaterial.GetTexture("_BaseMap"));
+                modelMaterials[i].SetColor("_BaseColor", inkMaterial.GetColor("_BaseColor"));
+                modelMaterials[i].SetTexture("_BumpMap", inkMaterial.GetTexture("_BumpMap"));
+            }
 
             //Vector3 rayOffset = new Vector3(transform.up.x, transform.up.y + 0.1f, transform.up.z);
             RaycastHit raycastHit;
             ray = new Ray(transform.position, -transform.up);
-            Debug.DrawRay(transform.position, -transform.up, Color.red, 2f);
-            if (Physics.Raycast(ray, out raycastHit))
+            if (Physics.Raycast(ray, out raycastHit, 1.1f))
             {
-                if (raycastHit.transform.tag != "Paintable")
+                if (raycastHit.transform == null || raycastHit.transform.tag != "Paintable")
                 {
                     print("not paintable");
                     return;
                 }
-
-                Color color = new Color();
 
                 //grabbedTexture = true;
                 Material mat = raycastHit.collider.gameObject.GetComponent<Renderer>().sharedMaterial;
@@ -104,15 +131,24 @@ public class ToWall : MonoBehaviour
                 int textureAtX = Mathf.FloorToInt(pCoord.x * tiling.x);
                 int textureAtZ = Mathf.FloorToInt(pCoord.y * tiling.y);
                 Color cool = t2d.GetPixel(textureAtX, textureAtZ);
-                color = cool;
+                Color color = cool;
 
                 Color color1 = new Color(theColor.r * (1f - similarColorsOffsetValue), theColor.g * (1f - similarColorsOffsetValue), theColor.b * (1f - similarColorsOffsetValue), theColor.a * (1f - similarColorsOffsetValue));
                 Color color2 = new Color(theColor.r * (1f + similarColorsOffsetValue), theColor.g * (1f + similarColorsOffsetValue), theColor.b * (1f + similarColorsOffsetValue), theColor.a * (1f + similarColorsOffsetValue));
-                if (ColorsSimilar(color1, color2, color))
+                if (ColorsSimilar(color1, color2, color) && inputMagnitude > 0.6f)
                 {
                     swimParticle.Play();
                     model.SetActive(false);
                     gun.SetActive(false);
+                    outfit.SetActive(false);
+                    playerSpeed = SwimVelocity;
+                }
+                else if(ColorsSimilar(color1, color2, color))
+                {
+                    swimParticle.Stop();
+                    model.SetActive(false);
+                    gun.SetActive(false);
+                    outfit.SetActive(false);
                     playerSpeed = SwimVelocity;
                 }
                 else
@@ -120,19 +156,37 @@ public class ToWall : MonoBehaviour
                     swimParticle.Stop();
                     model.SetActive(true);
                     gun.SetActive(true);
+                    outfit.SetActive(true);
                     playerSpeed = Velocity;
                     myNormal = Vector3.up;
                 }
-
             }
         }
         else
         {
+            GetComponent<CharacterController>().height = 2;
+            //squidkidRigs.weight = 0;
+            if(squidkidRigs.weight > 0)
+            {
+                squidkidRigs.weight -= SquidNowKidNow * Time.deltaTime;
+            }
+            else
+            {
+                squidkidRigs.weight = 0;
+            }
             swimParticle.Stop();
             model.SetActive(true);
             gun.SetActive(true);
+            outfit.SetActive(true);
             playerSpeed = Velocity;
             myNormal = Vector3.up;
+
+            for(int i = 0; i < modelMaterials.Count; i++)
+            {
+                modelMaterials[i].SetTexture("_BaseMap", origBaseMaps[i]);
+                modelMaterials[i].SetColor("_BaseColor", origColors[i]);
+                modelMaterials[i].SetTexture("_BumpMap", origBumpMaps[i]);
+            }
         }
         ray = new Ray(myTransform.position, myTransform.forward);
 
@@ -150,9 +204,9 @@ public class ToWall : MonoBehaviour
 
         float InputX = Input.GetAxis("Horizontal");
         float InputZ = Input.GetAxis("Vertical");
-        float inputMagnitude = new Vector2(InputX, InputZ).sqrMagnitude;
+        inputMagnitude = new Vector2(InputX, InputZ).sqrMagnitude;
 
-        if(inputMagnitude > 0.1f)
+        if (inputMagnitude > 0.1f)
         {
             anim.SetFloat("Blend", inputMagnitude, StartAnimTime, Time.deltaTime);
             anim.SetFloat("X", InputX, StartAnimTime / 3, Time.deltaTime);
@@ -168,6 +222,9 @@ public class ToWall : MonoBehaviour
         var cam = Camera.main;
         var forward = cam.transform.forward;
         var right = cam.transform.right;
+
+        forward.y = 0;
+        right.y = 0;
 
         forward.Normalize();
         right.Normalize();
@@ -191,11 +248,9 @@ public class ToWall : MonoBehaviour
 
         // update surface normal and isGrounded:
         ray = new Ray(myTransform.position, -myNormal); // cast ray downwards
-        if (Physics.Raycast(ray, out hit))
+        if (Physics.Raycast(ray, out hit, 2f))
         { // use it to update myNormal and isGrounded
-            isGrounded = hit.distance <= distGround + deltaGround;
-            if (isGrounded)
-                jumpingUp = false;
+            isGrounded = true;
             surfaceNormal = hit.normal;
         }
         else
@@ -204,7 +259,7 @@ public class ToWall : MonoBehaviour
             // assume usual ground normal to avoid "falling forever"
             surfaceNormal = Vector3.up;
         }
-        myNormal = Vector3.Lerp(myNormal, surfaceNormal, lerpSpeed * Time.deltaTime);
+        //myNormal = Vector3.Lerp(myNormal, surfaceNormal, lerpSpeed * Time.deltaTime);
         // find forward direction with new myNormal:
         Vector3 myForward = Vector3.Cross(myTransform.right, myNormal);
         // align character to the new myNormal while keeping the forward direction:
@@ -214,11 +269,22 @@ public class ToWall : MonoBehaviour
         //myTransform.Translate(0, 0, Input.GetAxis("Vertical") * moveSpeed * Time.deltaTime);
         if (myNormal != Vector3.up)
         {
-            if(Input.GetAxis("Vertical") > 0)
+            if (Input.GetAxis("Vertical") > 0)
                 GetComponent<CharacterController>().Move(myTransform.forward * Input.GetAxis("Vertical") * playerSpeed * Time.deltaTime);
-            if(Input.GetAxis("Vertical") < 0)
+            if (Input.GetAxis("Vertical") < 0)
                 GetComponent<CharacterController>().Move(-myTransform.forward * Input.GetAxis("Vertical") * playerSpeed * Time.deltaTime);
         }
+
+        if(Input.GetButtonDown("Jump"))
+        {
+            if (isGrounded && canJump)
+            {
+                StartCoroutine(JumpUp(-jumpHeight));
+            }
+        }
+
+        float surfaceMagnitude = Vector3.SqrMagnitude(new Vector2(Vector3.Cross(myNormal, surfaceNormal).x, Vector3.Cross(myNormal, surfaceNormal).z));
+        canJump = model.activeInHierarchy && surfaceMagnitude < 0.3f;
     }
 
     private void RotateToCamera(Camera cam, Vector3 desiredMoveDirection, float desiredRotationSpeed, Transform t)
@@ -280,9 +346,9 @@ public class ToWall : MonoBehaviour
         //for (float t = 0.0f; t < 0.2f;)
         //{
         //    t += Time.deltaTime;
-        myTransform.position = Vector3.Lerp(myTransform.position, dstPos, 0.02f);
+        myTransform.position = Vector3.Lerp(orgPos, dstPos, 0.09f);
         //myTransform.position = dstPos;
-        myTransform.rotation = Quaternion.Slerp(myTransform.rotation, dstRot, 0.02f);
+        myTransform.rotation = Quaternion.Slerp(orgRot, dstRot, 0.09f);
         //myTransform.rotation = dstRot;
         yield return null; // return here next frame
         //}
@@ -291,4 +357,21 @@ public class ToWall : MonoBehaviour
 
     }
 
+    private IEnumerator JumpUp(float grav)
+    {
+        anim.Play("Jumping");
+        float origGrav = gravity;
+        gravity = grav;
+        while (gravity < origGrav)
+        {
+            yield return new WaitForSeconds(0.2f);
+            gravity += 0.1f;
+            Ray jumpableRay = new Ray(transform.position, -transform.up);
+            RaycastHit hit;
+            if (Physics.Raycast(jumpableRay, out hit, 1.1f))
+            {
+                gravity = origGrav;
+            }
+        }
+    }
 }

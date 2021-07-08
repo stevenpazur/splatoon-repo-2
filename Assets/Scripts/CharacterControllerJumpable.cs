@@ -8,9 +8,11 @@ public class CharacterControllerJumpable : MonoBehaviour
     public float WalkSpeed = 1f;
     public float gravity = 1f;
     public float jumpForce = -5f;
-    public float jumpCheckDistance = 0.01f;
+    public float jumpCheckDistance = 1.1f, wallCheckDistance = 2f;
     [Range(0, 1)] public float colorSimilarity = 0.1f;
     public CollisionPainter collisionPainter;
+    public GameObject model;
+    public ParticleSystem swimParticle;
 
     private float origGravity;
     private float playerSpeed;
@@ -20,6 +22,7 @@ public class CharacterControllerJumpable : MonoBehaviour
     private Camera cam;
     private bool blockRotationPlayer = false, isGrounded = false;
     private Color teamColor;
+    private bool canSink = false, drowning = false;
 
     private void Start()
     {
@@ -94,12 +97,13 @@ public class CharacterControllerJumpable : MonoBehaviour
             }
         }
 
-        // Handle sinking/swimming
+        // Handle swimming and wall climbing
         if (Input.GetButton("Fire2"))
         {
             GetComponent<ShootingSystem>().canShoot = false;
 
-            Ray textureRay = new Ray(transform.position, -transform.up);
+            // Handle swimming
+            Ray textureRay = new Ray(transform.position, -transform.up); // cast ray downward
             if (Physics.Raycast(textureRay, out hit, jumpCheckDistance))
             {
                 if (hit.transform.tag != "Paintable")
@@ -107,6 +111,33 @@ public class CharacterControllerJumpable : MonoBehaviour
 
                 // get color player is standing on
                 StartCoroutine(CheckInkColor(hit));
+
+                model.SetActive(!canSink);
+                if (canSink)
+                    swimParticle.Play();
+                else
+                    swimParticle.Stop();
+            }
+
+            // Handle wall climbing
+            Ray wallRay = new Ray(transform.position, transform.forward); // cast ray forward
+            if (Physics.Raycast(wallRay, out hit, wallCheckDistance))
+            {
+                if (hit.transform.tag != "Paintable")
+                    return;
+
+                StartCoroutine(CheckInkColor(hit));
+
+                if (canSink)
+                {
+                    Vector3 orgPos = transform.position;
+                    Quaternion orgRot = transform.rotation;
+                    Vector3 dstPos = hit.point + hit.normal;
+                    Vector3 myForward = Vector3.Cross(transform.right, hit.normal);
+                    Quaternion dstRot = Quaternion.LookRotation(myForward, hit.normal);
+
+                    StartCoroutine(RotatePlayerOntoWall(orgPos, orgRot, dstPos, dstRot, hit.normal));
+                }
             }
         }
         else
@@ -132,6 +163,15 @@ public class CharacterControllerJumpable : MonoBehaviour
         }
     }
 
+    private IEnumerator RotatePlayerOntoWall(Vector3 orgPos, Quaternion orgRot, Vector3 dstPos, Quaternion dstRot, Vector3 normal)
+    {
+        transform.position = Vector3.Lerp(orgPos, dstPos, 0.5f);
+        desiredDirection = dstPos;
+        transform.rotation = Quaternion.Slerp(orgRot, dstRot, 0.5f);
+        myNormal = normal;
+        yield return null;
+    }
+
     private IEnumerator CheckInkColor(RaycastHit hit)
     {
         Material mat = hit.collider.gameObject.GetComponent<Renderer>().sharedMaterial;
@@ -155,14 +195,20 @@ public class CharacterControllerJumpable : MonoBehaviour
         if(ColorsSimilar(color1, color2, color))
         {
             // player is in his own ink
+            canSink = true;
+            drowning = false;
         }
         else if(color.a < 0.1f)
         {
             // player is not in any ink
+            canSink = false;
+            drowning = false;
         }
         else
         {
             // player is in enemy ink
+            canSink = false;
+            drowning = true;
         }
         yield return new WaitForSeconds(0.1f);
     }
